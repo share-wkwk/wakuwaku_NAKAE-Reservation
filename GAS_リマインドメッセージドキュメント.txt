@@ -11,7 +11,8 @@ GPT：https://chatgpt.com/share/68a70a71-0dc4-800e-8a52-0b2332e5e026
 
 送信内容：日付・時間、メニュー（説明欄から抽出）、挨拶
 
-1. 事前準備
+
+【1. 事前準備】
 
 LINE Developers
 
@@ -24,197 +25,33 @@ Googleカレンダー
 リマインド対象のカレンダーを決め、カレンダーIDを控える
 （Googleカレンダー → 設定 → 対象カレンダー →「カレンダーの統合」→ カレンダーID）
 
-イベントの入力ルール
+
+【イベントの入力ルール】
 
 イベントの**場所（Location）欄：識別ID（＝LINEのユーザーID）**を入れる
 
 イベントの説明（Description）欄：
-メニュー名を入れる場合は、下記のように囲うと自動抽出されます
+下記のように囲うと自動抽出されます
 
-≪メニュー≫
-〇〇コース 90分
-≪
+≪希望日時≫ 2025年08月04日 13:00
+≪LINEの名前≫ 中江つばさ
+≪お名前≫ ワクワクテスト予約
+≪電話番号≫ 01001010101
+≪メニュー≫ 
+・モイスティーヌPro（シンプル）
+≪ご来店回数≫ リピーター様
+≪メッセージ≫ 
 
-2. GAS（Apps Script）に貼り付けるコード
 
-Apps Script エディタで新規プロジェクトを作成し、下記を丸ごとコピペ
+【2. GAS（Apps Script）に貼り付けるコード】
 
-先に 「プロジェクトのプロパティ」→「スクリプトのプロパティ」 に
-LINE_CHANNEL_ACCESS_TOKEN と CALENDAR_ID を登録してください（手順は次章）
+Apps Script エディタで新規プロジェクトを作成し、"GAS_リマインドメッセージ.txt"を丸ごとコピペ
 
-/**
- * 予約前日リマインド（翌日のイベントを走査し、場所＝ユーザーID宛にLINEプッシュ）
- * タイムゾーンは「プロジェクトの設定」で店舗のTZに合わせてください（例：Asia/Tokyo）
- */
-function sendReminderMessages() {
-  // ===== 設定値はスクリプトのプロパティから取得 =====
-  const props = PropertiesService.getScriptProperties();
-  const LINE_CHANNEL_ACCESS_TOKEN = props.getProperty('LINE_CHANNEL_ACCESS_TOKEN'); // LINE長期アクセストークン
-  const calendarId = props.getProperty('CALENDAR_ID'); // GoogleカレンダーID
+"GAS_リマインドメッセージ.txt"の2行目にGoogleカレンダーのカレンダーIDを置き換える。
+24行目に公式LINEのLINE_CHANNEL_ACCESS_TOKENを置き換える。
 
-  if (!LINE_CHANNEL_ACCESS_TOKEN || !calendarId) {
-    console.error('必要なプロパティ(LINE_CHANNEL_ACCESS_TOKEN / CALENDAR_ID)が未設定です。');
-    return;
-  }
 
-  const LINE_API_URL = 'https://api.line.me/v2/bot/message/push';
-
-  // ===== 対象期間：翌日 00:00〜翌日 23:59（内部はTZに依存） =====
-  const now = new Date();
-  const tz = Session.getScriptTimeZone(); // 例: Asia/Tokyo
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-
-  const start = new Date(y, m, d + 1, 0, 0, 0);   // 翌日00:00
-  const end   = new Date(y, m, d + 2, 0, 0, 0);   // 翌々日00:00（排他的）
-
-  // ===== カレンダー取得 =====
-  const cal = CalendarApp.getCalendarById(calendarId);
-  if (!cal) {
-    console.error('指定したカレンダーIDが見つかりません。');
-    return;
-  }
-
-  // 翌日の全イベント取得
-  const events = cal.getEvents(start, end);
-  if (events.length === 0) {
-    console.log('翌日の対象イベントはありませんでした。');
-    return;
-  }
-
-  // ===== 曜日表記（日本語） =====
-  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-
-  // ===== イベント走査 =====
-  events.forEach(event => {
-    const userId = (event.getLocation() || '').trim(); // 場所欄にLINEのユーザーID
-    if (!userId) return; // 識別IDが無いイベントはスキップ
-
-    // イベント情報
-    const startTime = event.getStartTime();
-    const dateText =
-      Utilities.formatDate(startTime, tz, 'yyyy年MM月dd日') +
-      '（' + weekdays[startTime.getDay()] + '） ' +
-      Utilities.formatDate(startTime, tz, 'HH時mm分');
-
-    const description = event.getDescription() || '';
-
-    // ≪メニュー≫ ... ≪ で囲われた本文を抽出（任意）
-    let menuText = '未設定';
-    const menuMatch = description.match(/≪メニュー≫\s*([\s\S]*?)≪/);
-    if (menuMatch && menuMatch[1]) {
-      menuText = menuMatch[1].trim();
-    }
-
-    // ===== Flexメッセージ（リマインド） =====
-    const flexMessage = {
-      type: 'flex',
-      altText: 'ご予約前日のリマインドです',
-      contents: {
-        type: 'bubble',
-        size: 'mega',
-        header: {
-          type: 'box',
-          layout: 'vertical',
-          contents: [
-            { type: 'text', text: '【予約前日メッセージ】', color: '#ffffff', size: 'xl', weight: 'bold' }
-          ],
-          paddingAll: '16px',
-          backgroundColor: '#877059'
-        },
-        body: {
-          type: 'box',
-          layout: 'vertical',
-          contents: [
-            { type: 'text', text: '明日のご予約をお知らせします', weight: 'bold', size: 'lg', color: '#333333', wrap: true, align: 'center', margin: 'md' },
-            { type: 'separator', margin: 'lg', color: '#CCCCCC' },
-            {
-              type: 'box',
-              layout: 'vertical',
-              margin: 'lg',
-              contents: [
-                { type: 'text', text: '📅 日時', color: '#666666', size: 'sm', weight: 'bold', margin: 'md' },
-                { type: 'text', text: dateText, wrap: true, size: 'sm', color: '#333333', margin: 'xs' },
-                { type: 'text', text: '📝 メニュー', color: '#666666', size: 'sm', weight: 'bold', margin: 'lg' },
-                { type: 'text', text: menuText, wrap: true, size: 'sm', color: '#333333', margin: 'xs' }
-              ]
-            },
-            { type: 'separator', margin: 'xxl', color: '#CCCCCC' },
-            { type: 'text', text: 'ご来店を心よりお待ちしております', wrap: true, margin: 'xl', size: 'sm', align: 'center', color: '#474646' }
-          ]
-        }
-      }
-    };
-
-    // ===== LINEプッシュ送信 =====
-    const payload = { to: userId, messages: [flexMessage] };
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    };
-
-    try {
-      const res = UrlFetchApp.fetch(LINE_API_URL, options);
-      const code = res.getResponseCode();
-      if (code >= 200 && code < 300) {
-        console.log(`送信成功: ${userId} にリマインド送信`);
-      } else {
-        console.error(`送信失敗(${code}): ${res.getContentText()}`);
-      }
-    } catch (e) {
-      console.error('送信エラー: ' + e.message);
-    }
-  });
-}
-
-/**
- * 手動テスト用：任意のユーザーIDにダミーのリマインドを送る
- * - スクリプトのプロパティに TEST_USER_ID を設定して実行すると便利です
- */
-function debugSendTest() {
-  const props = PropertiesService.getScriptProperties();
-  const testUserId = props.getProperty('TEST_USER_ID');
-  if (!testUserId) {
-    console.error('TEST_USER_ID が未設定です');
-    return;
-  }
-  // 簡易メッセージで疎通チェック
-  const token = props.getProperty('LINE_CHANNEL_ACCESS_TOKEN');
-  const url = 'https://api.line.me/v2/bot/message/push';
-  const payload = {
-    to: testUserId,
-    messages: [{ type: 'text', text: 'テスト：前日リマインド送信テストです。' }]
-  };
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + token },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-  const res = UrlFetchApp.fetch(url, options);
-  console.log('TEST RES', res.getResponseCode(), res.getContentText());
-}
-
-3. 機密情報の設定（スクリプトプロパティ）
-
-Apps Scriptエディタ → 歯車アイコン（プロジェクトの設定） → 下部の**「スクリプトのプロパティ」** → 「追加」
-
-以下のキーと値を追加
-
-LINE_CHANNEL_ACCESS_TOKEN：LINEのチャネルアクセストークン
-
-CALENDAR_ID：予約用カレンダーID
-
-（任意）TEST_USER_ID：テスト用に自分のLINEユーザーID
-
-※ コード直書きより安全。権限のあるメンバー以外に漏れにくく、差し替えも容易。
-
-4. トリガー設定（自動実行）
+【3. トリガー設定（自動実行）】
 
 Apps Scriptエディタ → 左側「時計」アイコン（トリガー） → トリガーを追加
 
@@ -228,7 +65,7 @@ Apps Scriptエディタ → 左側「時計」アイコン（トリガー） →
 
 例）「前日の19:00に翌日の予約をまとめて通知」など
 
-5. よくあるQA
+【4. よくあるQA】
 
 Q. イベントが取得されない
 A. カレンダーIDの間違い／トリガーのタイムゾーン違い／翌日にイベントが無い、などを確認
@@ -237,14 +74,4 @@ Q. 誰にも届かない
 A. イベントの場所（Location）にLINEユーザーIDが入っているか確認（空欄だとスキップ）
 
 Q. メニューが「未設定」になる
-A. 説明欄の記述が**「≪メニュー≫ … ≪」**の形式になっているか確認
-
-6. 変更ポイント（元コードとの違い）
-
-アクセストークンとカレンダーIDはプロパティ管理に変更（安全性向上）
-
-翌日範囲を00:00〜24:00で網羅（取りこぼし防止）
-
-エラーハンドリングとログを調整（原因追跡しやすく）
-
-テスト関数 debugSendTest を追加（疎通確認しやすく）
+A. 説明欄の記述が【1. 事前準備】の【イベントの入力ルール】に記載されているテンプレートの形式になっているか確認
